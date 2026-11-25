@@ -1,0 +1,5 @@
+{
+  "_comentario": "Xray Cloud. Los casos y las Test Executions los crea el QE manualmente; el framework solo cambia estados. 'ambientes' traduce AMBIENTE al Test Environment para avisar si no coincide con la Test Execution. Credenciales NUNCA aquí: XRAY_CLIENT_ID y XRAY_CLIENT_SECRET.",
+  "jiraUrl": "",
+  "ambientes": {"local": "LOCAL", "dev": "DEV", "certi": "CERTI"}
+}

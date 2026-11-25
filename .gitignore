@@ -1,0 +1,48 @@
+# Entornos virtuales (cada QE crea el suyo: no son portables entre PCs)
+venv/
+.venv/
+env/
+
+# IDEs
+.idea/
+.vscode/*
+!.vscode/mcp.json
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Salidas de ejecución
+src/test/reports/
+screenshots/
+Evidencias/
+*.output
+output.xml
+*.log
+geckodriver.log
+
+# Drivers (se resuelven solos: webdriver-manager / Selenium Manager)
+src/test/resources/drivers/
+*.exe
+
+# Secretos
+.env
+credentials.json
+*.pem
+*.key
+
+# Estado local del MCP
+tools/mcp_framework/.cache/
+
+# Otros
+node_modules/
+allure-results/
+allure-report/
+~$*.xlsx
+~$*.docx
+
+# Respaldos y filas pendientes de agregar_filas_excel
+.respaldo_excel/
+resultados_casos.json
+evidencias_sharepoint/

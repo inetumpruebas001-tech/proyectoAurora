@@ -1,0 +1,26 @@
+{
+  "_comentario": "Un bloque por ambiente, como los environments de Postman. Se elige con AMBIENTE=dev|certi|prod|local. Cualquier valor se puede sobrescribir con una variable de entorno en MAYÚSCULAS (BASEURL, SEMILLERO...).",
+  "local": {
+    "baseUrl": "http://localhost:3000",
+    "semillero": "qe-auto",
+    "salud": "/api/health",
+    "espera_despertar_seg": 20
+  },
+  "dev": {
+    "baseUrl": "https://aurora-vida-dev.onrender.com",
+    "semillero": "qe-auto",
+    "salud": "/api/health",
+    "espera_despertar_seg": 120
+  },
+  "certi": {
+    "baseUrl": "",
+    "semillero": "qe-auto",
+    "salud": "/api/health",
+    "espera_despertar_seg": 120
+  },
+  "prod": {
+    "baseUrl": "",
+    "salud": "/api/health",
+    "bloqueado": true
+  }
+}

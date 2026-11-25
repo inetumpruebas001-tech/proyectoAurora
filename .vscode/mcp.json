@@ -1,0 +1,36 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "xray-client-id",
+      "description": "Xray Client ID (API Key de Xray; déjalo vacío si aún no la tienes)",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "xray-client-secret",
+      "description": "Xray Client Secret",
+      "password": true
+    }
+  ],
+  "servers": {
+    "framework-api": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/venv/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/tools/mcp_framework/server.py"
+      ],
+      "env": {
+        "FRAMEWORK_ROOT": "${workspaceFolder}",
+        "MCP_TAGS_BLOQUEADOS": "prod,produccion",
+        "MCP_PERMITIR_EJECUCION": "true",
+        "XRAY_CLIENT_ID": "${input:xray-client-id}",
+        "XRAY_CLIENT_SECRET": "${input:xray-client-secret}"
+      }
+    },
+    "atlassian": {
+      "type": "http",
+      "url": "https://mcp.atlassian.com/v1/mcp/authv2"
+    }
+  }
+}

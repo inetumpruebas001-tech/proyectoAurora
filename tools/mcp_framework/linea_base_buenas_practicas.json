@@ -1,0 +1,9 @@
+{
+  "descripcion": "Deuda técnica conocida. Solo bloquean los hallazgos que NO estén aquí.",
+  "huellas": {
+    "5f8d7469e685cb38": 2,
+    "bfe2fb9b1bc32471": 1,
+    "ee832d6b7e2550e4": 1,
+    "fa660c6db0c8b587": 3
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$comment": "Ejemplo: forma del response de GET /api/health. Para un servicio, copia aquí el contrato OpenAPI (openapi.json) y usa openapi.json#/components/schemas/<Nombre>.",
+  "type": "object",
+  "required": ["estado", "ambiente"],
+  "properties": {
+    "estado": { "type": "string", "enum": ["OK"] },
+    "ambiente": { "type": "string" },
+    "historias": { "type": "array", "items": { "type": "string" } }
+  }
+}

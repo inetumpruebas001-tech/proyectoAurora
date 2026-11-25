@@ -1,0 +1,121 @@
+# Pruebas de API (Behave + Excel) en GitHub Actions.
+# Compuerta -> behave por tag -> reportes (Word/HTML/JUnit) -> evidencias ordenadas para SharePoint
+# -> estados en la Test Execution de Xray que el QE ya creó (nunca crea casos ni ejecuciones).
+#
+# Manual: Actions -> "Pruebas API" -> Run workflow (ambiente, tags, Test Plan, Test Execution).
+# Programado: regresión de lunes a viernes en DEV con TAGS_REGRESION y la Test Execution XRAY_TE_DEV.
+#
+# Secrets del repositorio (Settings -> Secrets and variables -> Actions):
+#   XRAY_CLIENT_ID, XRAY_CLIENT_SECRET   API Key de Xray (para actualizar la Test Execution)
+#   AZURE_STORAGE_ACCOUNT_KEY            solo si se registra en Azure Table (LOG_TABLA)
+# Variables: TAGS_REGRESION (ej. @HU01), XRAY_TEST_PLAN y XRAY_TE_DEV (para la regresión programada),
+#            LOG_TABLA, AZURE_STORAGE_ACCOUNT_NAME, AZURE_TABLE_NAME
+
+name: Pruebas API
+
+on:
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: 'Ambiente (prod no está disponible)'
+        type: choice
+        options: [dev, certi]
+        default: dev
+      tags:
+        description: 'Tags de behave (ej. @HU01 o @HU01 and @Cotizador)'
+        type: string
+        default: '@Ejemplo'
+      test_plan:
+        description: 'Test Plan de Xray (ej. TAP-4000): ordena las evidencias'
+        type: string
+        default: ''
+      test_execution:
+        description: 'Test Execution de Xray YA CREADA (ej. TAP-5000). Vacío = no se actualiza Xray'
+        type: string
+        default: ''
+  schedule:
+    - cron: '0 11 * * 1-5'          # 06:00 hora de Perú (UTC-5)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pruebas-api-${{ github.ref }}-${{ inputs.ambiente || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AMBIENTE: ${{ inputs.ambiente || 'dev' }}
+      TAGS: ${{ inputs.tags || vars.TAGS_REGRESION || '@Ejemplo' }}
+      TEST_PLAN: ${{ inputs.test_plan || vars.XRAY_TEST_PLAN || '' }}
+      TEST_EXECUTION: ${{ inputs.test_execution || (github.event_name == 'schedule' && vars.XRAY_TE_DEV) || '' }}
+      SEMILLERO: qe-gha
+      CICLO: ${{ github.run_number }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Validar ambiente y tags
+        run: |
+          if [ -z "$(echo "$TAGS" | tr -d ' ')" ]; then echo "::error::Indica al menos un tag"; exit 1; fi
+          if echo "$TAGS" | grep -qi '@prod'; then echo "::error::Los tags de PROD están bloqueados"; exit 1; fi
+          echo "Ambiente: $AMBIENTE | Tags: $TAGS | Test Plan: ${TEST_PLAN:--} | Test Execution: ${TEST_EXECUTION:--}"
+
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements.txt
+
+      - name: Compuerta de buenas prácticas
+        run: python tools/mcp_framework/server.py --revisar --todo
+
+      # Sin "|| true": si un escenario falla, el job queda en rojo
+      - name: Ejecutar pruebas
+        run: python -m behave --tags="$TAGS"
+        env:
+          LOG_TABLA: ${{ vars.LOG_TABLA || 'false' }}          # true = registra cada escenario en Azure Table
+          AZURE_STORAGE_ACCOUNT_NAME: ${{ vars.AZURE_STORAGE_ACCOUNT_NAME }}
+          AZURE_TABLE_NAME: ${{ vars.AZURE_TABLE_NAME }}
+          AZURE_STORAGE_ACCOUNT_KEY: ${{ secrets.AZURE_STORAGE_ACCOUNT_KEY }}
+
+      - name: Publicar evidencias (Word + HTML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-${{ env.AMBIENTE }}-${{ github.run_number }}
+          path: src/test/reports
+          if-no-files-found: ignore
+
+      - name: Resultados en la pestaña del run (JUnit)
+        if: always() && hashFiles('output.xml') != ''
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: output.xml
+          check_name: API ${{ env.TAGS }} - ${{ env.AMBIENTE }}
+
+      - name: Evidencias ordenadas para SharePoint
+        if: always() && env.TEST_PLAN != '' && env.TEST_EXECUTION != '' && hashFiles('resultados_casos.json') != ''
+        run: python tools/xray/evidencias.py --test-plan "$TEST_PLAN" --test-execution "$TEST_EXECUTION"
+
+      - name: Publicar carpeta para SharePoint
+        if: always() && env.TEST_PLAN != '' && env.TEST_EXECUTION != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharepoint-${{ env.TEST_EXECUTION }}
+          path: evidencias_sharepoint
+          if-no-files-found: ignore
+
+      # Cambia estados SOLO en la Test Execution indicada (creada por el QE). Lanzar el workflow con
+      # esa clave es la confirmación. Casos fuera de la Test Execution o sin clave se informan como aviso.
+      - name: Actualizar Test Execution en Xray
+        if: always() && env.TEST_EXECUTION != '' && hashFiles('resultados_casos.json') != ''
+        env:
+          XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
+          XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}
+        run: python tools/xray/xray_cloud.py --test-execution "$TEST_EXECUTION"

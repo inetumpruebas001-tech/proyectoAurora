@@ -1,0 +1,154 @@
+# Pruebas de API (Behave + Excel) en Azure DevOps.
+# Mismo esquema que un pipeline corporativo: compuerta -> behave por tag -> Word/HTML/JUnit
+# y, opcionalmente, registro de cada escenario en Azure Table Storage con la clave en Key Vault.
+#
+# Ejecutar a mano: Pipelines -> Run pipeline -> elegir ambiente y tags.
+# Programado: regresión de lunes a viernes en DEV.
+
+trigger: none          # no corre en cada push: las pruebas se lanzan por tag o por horario
+
+schedules:
+- cron: '0 11 * * 1-5'                 # 06:00 hora de Perú (UTC-5)
+  displayName: 'Regresión diaria en DEV'
+  branches:
+    include: [ main ]
+  always: true
+
+parameters:
+- name: ambiente
+  displayName: 'Ambiente (prod no está disponible)'
+  type: string
+  default: dev
+  values: [ dev, certi ]
+- name: tags
+  displayName: 'Tags de behave (ej. @Ejemplo, @HU01 o @HU01 and @Cotizador)'
+  type: string
+  default: '@Ejemplo'
+- name: agente
+  displayName: 'Agente (hospedado = Microsoft; propio = tu PC con el agente instalado)'
+  type: string
+  default: propio
+  values: [ propio, hospedado ]
+- name: testExecution
+  displayName: 'Test Execution de Xray YA CREADA (ej. TAP-5000). Vacío = no se actualiza Xray'
+  type: string
+  default: ''
+- name: registrarEnTabla
+  displayName: 'Registrar cada escenario en Azure Table Storage'
+  type: boolean
+  default: false
+
+variables:
+- name: SEMILLERO          # aísla los datos y el reloj de la API para este pipeline
+  value: 'qe-ado'
+- name: CICLO
+  value: '$(Build.BuildNumber)'
+# Grupo de variables enlazado a Key Vault (Library -> Variable groups). Solo se usa si registras en la tabla.
+# Debe exponer el secreto 'storage-account-key' y las variables AZURE_STORAGE_ACCOUNT_NAME y AZURE_TABLE_NAME.
+- ${{ if eq(parameters.registrarEnTabla, true) }}:
+  - group: qe-azure-keyvault
+
+pool:
+  ${{ if eq(parameters.agente, 'hospedado') }}:
+    vmImage: 'windows-latest'
+  ${{ else }}:
+    name: 'Default'          # pool de agentes propios (self-hosted)
+
+steps:
+- ${{ if eq(parameters.agente, 'hospedado') }}:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.12'
+      addToPath: true
+    displayName: 'Python 3.12'
+
+- task: PowerShell@2
+  displayName: 'Validar ambiente y tags'
+  inputs:
+    targetType: 'inline'
+    script: |
+      $tags = "${{ parameters.tags }}".Trim()
+      if (-not $tags) { Write-Error "Indica al menos un tag: no se ejecuta la suite completa."; exit 1 }
+      if ($tags -match '(?i)@prod') { Write-Error "Los tags de PROD están bloqueados en este pipeline."; exit 1 }
+      Write-Host "Ambiente: ${{ parameters.ambiente }} | Tags: $tags | Semillero: $(SEMILLERO)"
+
+- task: PowerShell@2
+  displayName: 'Instalar dependencias'
+  inputs:
+    targetType: 'inline'
+    script: |
+      python --version
+      python -m pip install --upgrade pip
+      python -m pip install -r requirements.txt
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Compuerta de buenas prácticas: falla si el cambio agrega errores nuevos respecto de la línea base
+- task: PowerShell@2
+  displayName: 'Compuerta de buenas prácticas'
+  inputs:
+    targetType: 'inline'
+    script: |
+      python tools/mcp_framework/server.py --revisar --todo
+      exit $LASTEXITCODE
+
+# Sin "exit 0": si un escenario falla, el pipeline queda en rojo
+- task: PowerShell@2
+  displayName: 'Ejecutar pruebas (${{ parameters.ambiente }})'
+  inputs:
+    targetType: 'inline'
+    script: |
+      python -m behave --tags="${{ parameters.tags }}"
+      exit $LASTEXITCODE
+  env:
+    AMBIENTE: ${{ parameters.ambiente }}
+    SEMILLERO: $(SEMILLERO)
+    CICLO: $(CICLO)
+    PYTHONIOENCODING: 'utf-8'
+    ${{ if eq(parameters.registrarEnTabla, true) }}:
+      LOG_TABLA: 'true'
+      AZURE_STORAGE_ACCOUNT_NAME: $(AZURE_STORAGE_ACCOUNT_NAME)
+      AZURE_TABLE_NAME: $(AZURE_TABLE_NAME)
+      AZURE_STORAGE_ACCOUNT_KEY: $(storage-account-key)   # secreto traído de Key Vault: nunca en el repo
+
+- ${{ if ne(parameters.testExecution, '') }}:
+  - task: PowerShell@2
+    displayName: 'Actualizar Test Execution en Xray'
+    condition: succeededOrFailed()
+    inputs:
+      targetType: 'inline'
+      script: |
+        if (Test-Path resultados_casos.json) { python tools/xray/xray_cloud.py --test-execution "${{ parameters.testExecution }}"; exit $LASTEXITCODE }
+    env:
+      XRAY_CLIENT_ID: $(XRAY_CLIENT_ID)           # variables secretas del pipeline o Key Vault
+      XRAY_CLIENT_SECRET: $(XRAY_CLIENT_SECRET)
+
+# Los reportes se publican SIEMPRE, también cuando hay fallos
+- task: PublishBuildArtifacts@1
+  displayName: 'Publicar evidencias (Word + HTML)'
+  condition: succeededOrFailed()
+  inputs:
+    PathtoPublish: 'src/test/reports'
+    ArtifactName: 'reporte-${{ parameters.ambiente }}'
+    publishLocation: 'Container'
+
+- task: PublishTestResults@2
+  displayName: 'Publicar resultados (pestaña Tests)'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: 'JUnit'
+    testResultsFiles: 'output.xml'
+    testRunTitle: 'API ${{ parameters.tags }} - ${{ parameters.ambiente }}'
+    failTaskOnFailedTests: true
+
+# Opcional: pestaña con el reporte HTML. Requiere la extensión "HTML Viewer" del Marketplace.
+# - task: PowerShell@2
+#   condition: succeededOrFailed()
+#   inputs:
+#     targetType: 'inline'
+#     script: |
+#       $f = Get-ChildItem src/test/reports -Directory | Where-Object { $_.Name -match '^report-' } | Select-Object -First 1 -ExpandProperty Name
+#       echo "##vso[task.setvariable variable=reportFolderName]$f"
+# - task: PublishHtmlReport@1
+#   condition: succeededOrFailed()
+#   inputs:
+#     reportDir: 'src/test/reports/$(reportFolderName)/overview-features.html'

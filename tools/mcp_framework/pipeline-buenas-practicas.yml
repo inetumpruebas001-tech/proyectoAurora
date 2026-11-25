@@ -1,0 +1,8 @@
+# Agregar en azure-pipelines.yml ANTES del paso "Run behave tests".
+# Falla el build si hay errores nuevos respecto de la línea base.
+- task: PowerShell@2
+  inputs:
+    targetType: 'inline'
+    script: |
+      python tools/mcp_framework/server.py --revisar --todo
+  displayName: 'Revisión de buenas prácticas'

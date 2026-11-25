@@ -1,0 +1,13 @@
+#!/bin/sh
+# Compuerta de buenas prácticas antes de cada commit.
+# Activar una sola vez:  git config core.hooksPath .githooks
+PY="venv/Scripts/python.exe"
+[ -x "$PY" ] || PY="venv/bin/python"
+[ -x "$PY" ] || PY="python"
+"$PY" tools/mcp_framework/server.py --revisar
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "Commit bloqueado: el cambio introduce errores de buenas prácticas."
+  echo "Corrígelos (o pide a Copilot: /revisar-buenas-practicas) y vuelve a intentar."
+  exit 1
+fi
